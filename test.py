@@ -2,16 +2,30 @@ from langchain_community.llms import Ollama
 from langgraph.graph import END, Graph
 import pandas as pd
 import re
-from sentence_transformers import SentenceTransformer
+#from sentence_transformers import SentenceTransformer
 import numpy as np
+import tensorflow_hub as hub
+from sklearn.preprocessing import normalize
+
 llm = Ollama(model="phi3")
-model = SentenceTransformer('all-MiniLM-L6-v2')
+#model = SentenceTransformer('all-MiniLM-L6-v2')
+model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
+model = hub.load(model_url)
 np.random.seed(79)
+
+# kmeans = MiniBatchKMeans(n_clusters=11, random_state=0)
 class LSH:
     def __init__(self, num_features, num_bins, num_planes):
         self.num_bins = num_bins
         self.num_planes = num_planes
-        self.planes = [np.random.randn(num_features) for _ in range(num_planes)]
+        assert num_planes <= num_features, "Number of planes must be <= number of features"
+        self.planes = self.generate_orthogonal_planes(num_features, num_planes)
+
+    def generate_orthogonal_planes(self, num_features, num_planes):
+        # Generate a random matrix and perform QR decomposition to get orthogonal vectors
+        random_matrix = np.random.randn(num_features, num_planes)
+        q, _ = np.linalg.qr(random_matrix)
+        return q.T  # Transpose to make each row a plane vector
 
     def hash_vector(self, vector):
         hash_value = 0
@@ -38,29 +52,54 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 def embed(sentence):
-    return model.encode(sentence)
+    """Returns the embedding for a single sentence."""
+    embeddings = model([sentence])
+    # Normalize the embedding to use cosine similarity
+    return normalize(embeddings)[0]
+# def embed(sentence):
+#     return model.encode(sentence)
+
+# def kmn(embedding):
+#      kmeans.partial_fit(embedding)
+#      label = kmeans.predict(embedding)
+#      return label[0]
+def hsh(vector):
+    return lsh.hash_vector(vector)
+# df["hasv"]=df["embedding"].apply(hsh)
+# result = df[df["hasv"] == 19]["Comment"]
 # Load CSV file
 df = pd.read_csv('comment/export-youtube-comments.csv')
 
-# Apply the cleaning function to the Comment column
+# # Apply the cleaning function to the Comment column
 
 df['Comment'] = df['Comment'].apply(clean_text)
 df["embedding"]=df["Comment"].apply(embed)
-
-
-num_features = 384  # Length of each vector
-num_vectors = len(df)  # Number of vectors
-num_bins = 51      # Number of bins
-num_planes = 7     # Number of hyperplanes
-
-
-def hsh(vector):
-    lsh = LSH(num_features, num_bins, num_planes)
-    return lsh.hash_vector(vector)
+#df["label"]=df["embedding"].apply(kmn)
+# Group by 'label' and extract sentences
+#grouped = df.groupby('label')['Comment']
+num_features = len(df["embedding"][0])  
+num_vectors = len(df)  
+num_bins = 51      
+num_planes = 51   
+lsh = LSH(num_features, num_bins, num_planes)
 df["hasv"]=df["embedding"].apply(hsh)
-result = df[df["hasv"] == 19]["Comment"]
-print(result)
-print(df.groupby("hasv").count())
+grouped = df.groupby('hasv')['Comment']
+# Print sentences for each label group
+for label, sentences in grouped:
+    print(f"Label {label}:")
+    for sentence in sentences:
+        print(f" - {sentence}")
+    print()  # For better separation of groups
+
+
+
+
+
+# print(result)
+# print(df.groupby("hasv").count())
+
+
+
 
     
 # Define the function to check for improvement suggestion

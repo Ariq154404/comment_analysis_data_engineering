@@ -6,14 +6,12 @@ import re
 import numpy as np
 import tensorflow_hub as hub
 from sklearn.preprocessing import normalize
-
+import copy
 llm = Ollama(model="phi3")
 #model = SentenceTransformer('all-MiniLM-L6-v2')
-model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
-model = hub.load(model_url)
-np.random.seed(79)
+# model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
+# model = hub.load(model_url)
 
-# kmeans = MiniBatchKMeans(n_clusters=11, random_state=0)
 class LSH:
     def __init__(self, num_features, num_bins, num_planes):
         self.num_bins = num_bins
@@ -51,58 +49,34 @@ def clean_text(text):
     # Remove extra spaces
     text = re.sub(r'\s+', ' ', text).strip()
     return text
-def embed(sentence):
-    """Returns the embedding for a single sentence."""
-    embeddings = model([sentence])
-    # Normalize the embedding to use cosine similarity
-    return normalize(embeddings)[0]
 # def embed(sentence):
-#     return model.encode(sentence)
+#     """Returns the embedding for a single sentence."""
+#     embeddings = model([sentence])
+#     # Normalize the embedding to use cosine similarity
+#     return normalize(embeddings)[0]
+def embed(sentence):
+    return model.encode(sentence)
 
-# def kmn(embedding):
-#      kmeans.partial_fit(embedding)
-#      label = kmeans.predict(embedding)
-#      return label[0]
+
 def hsh(vector):
     return lsh.hash_vector(vector)
-# df["hasv"]=df["embedding"].apply(hsh)
-# result = df[df["hasv"] == 19]["Comment"]
-# Load CSV file
-df = pd.read_csv('comment/export-youtube-comments.csv')
 
-# # Apply the cleaning function to the Comment column
-
-df['Comment'] = df['Comment'].apply(clean_text)
-df["embedding"]=df["Comment"].apply(embed)
-#df["label"]=df["embedding"].apply(kmn)
-# Group by 'label' and extract sentences
-#grouped = df.groupby('label')['Comment']
-num_features = len(df["embedding"][0])  
-num_vectors = len(df)  
-num_bins = 51      
-num_planes = 51   
-lsh = LSH(num_features, num_bins, num_planes)
-df["hasv"]=df["embedding"].apply(hsh)
-grouped = df.groupby('hasv')['Comment']
-# Print sentences for each label group
-for label, sentences in grouped:
-    print(f"Label {label}:")
-    for sentence in sentences:
-        print(f" - {sentence}")
-    print()  # For better separation of groups
-
-
-
-
-
-# print(result)
-# print(df.groupby("hasv").count())
-
-
-
-
-    
 # Define the function to check for improvement suggestion
+
+def point_made(state):
+    statement = state['messages'][-1]['statement']
+    context= state['messages'][-1]['context']
+    response = llm.invoke(
+        '''Given the summary transcript of a video:'''+context+'''
+        .The following is a comment on such a video:'''
+        + statement+'''
+        .Concisely write about the subject the person is talking about in the comment in around 10 words in single sentence. Sample kind of output example that you should generate
+        :
+        The person talks about what he likes, The person talks about content of the video, The person talks about where he lives...e.t.c .
+        It sould start with The person talks about... followed by the subject'''
+    )
+    state['messages'][-1]["response"]= response
+    return state
 def check_improvement(state):
     statement = state['messages'][-1]['statement']
     context= state['messages'][-1]['context']
@@ -128,7 +102,7 @@ def where_to_go(state):
 
 # Define the function for preprocessing state
 def print_out(state):
-    print(state['messages'][-1])
+    return state['messages'][-1]["response"]
 def preprocess(state):
     comment=state['messages'][-1]['statement']
     context=state['messages'][-1]['context']
@@ -138,35 +112,64 @@ def preprocess(state):
 
 # Create the workflow
 workflow = Graph()
-
+workflow2=Graph()
 # Add nodes to the workflow
-workflow.add_node("check_improvement", check_improvement)
-workflow.add_node("preprocess", preprocess)
-workflow.add_node("print_out", print_out)
+#workflow.add_node("check_improvement", check_improvement)
+#workflow.add_node("preprocess", preprocess)
+workflow2.add_node("print_out", print_out)
 workflow.add_node("summarize",summarize)
+workflow2.add_node("point_made",point_made)
 # Add conditional edges
-workflow.add_conditional_edges(
-   "check_improvement", 
-   where_to_go,
-   {
-       "continue": "preprocess",
-       "end": END
-   }
-)
+# workflow.add_conditional_edges(
+#    "check_improvement", 
+#    where_to_go,
+#    {
+#        "continue": "preprocess",
+#        "end": END
+#    }
+# )
 
 
-workflow.add_edge("preprocess", "print_out")
-workflow.add_edge("summarize","check_improvement")
-# Set the entry point
-#workflow.set_entry_point("check_improvement")
-#workflow.set_finish_point("print_out")
+#workflow.add_edge("preprocess", "print_out")
+#workflow.add_edge("summarize","check_improvement")
+#workflow.add_edge("summarize","point_made")
+workflow2.add_edge("point_made","print_out")
 workflow.set_entry_point("summarize")
-workflow.set_finish_point("print_out")
+workflow.set_finish_point("summarize")
+
+workflow2.set_entry_point("point_made")
+workflow2.set_finish_point("print_out")
 # Compile the workflow
 app = workflow.compile()
 
-#with open('transcript.txt', 'r') as file:
-#    file_contents = file.read()
-# Test the workflow
-#input_data = {"messages": [{"statement": "The video should have demonstrate how AI can help in music","context":file_contents}]}
-#app.invoke(input_data)
+app2=workflow2.compile()
+
+with open('transcript.txt', 'r') as file:
+   file_contents = file.read()
+
+input_data = {"messages": [{"context":file_contents}]}
+summary=app.invoke(input_data)
+print(summary['messages'][-1]["context"])
+
+def gen_point(comment):
+    state=copy.deepcopy(summary)
+    state['messages'][-1]['statement']=comment
+    return app2.invoke(state)
+    
+
+
+df = pd.read_csv('comment/export-youtube-comments.csv')
+df=df[:40]
+df["Comment"]=df["Comment"].apply(clean_text)
+df["point_made"]=df["Comment"].apply(gen_point)
+df.to_csv('point_made.csv', index=False)
+# df["hasv"]=df["embedding"].apply(hsh)
+# grouped = df.groupby('hasv')['Comment']
+
+
+# # Print sentences for each label group
+# for label, sentences in grouped:
+#     print(f"Label {label}:")
+#     for sentence in sentences:
+#         print(f" - {sentence}")
+#     print()  # For better separation of groups

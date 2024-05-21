@@ -63,6 +63,21 @@ def hsh(vector):
 
 # Define the function to check for improvement suggestion
 
+# def point_made(state):
+#     statement = state['messages'][-1]['statement']
+#     context= state['messages'][-1]['context']
+#     response = llm.invoke(
+#         '''Given the summary transcript of a video:'''+context+'''
+#         .The following is a comment on such a video:'''
+#         + statement+'''
+#         .Concisely write about the subject the person is talking about in the comment in around 10 words in single sentence. Sample kind of output example that you should generate
+#         :
+#         The person talks about what he likes, The person talks about content of the video, The person talks about where he lives...e.t.c .
+#         It sould start with The person talks about... followed by the subject'''
+#     )
+#     state['messages'][-1]["response"]= response
+#     return state
+
 def point_made(state):
     statement = state['messages'][-1]['statement']
     context= state['messages'][-1]['context']
@@ -72,10 +87,19 @@ def point_made(state):
         + statement+'''
         .Concisely write about the subject the person is talking about in the comment in around 10 words in single sentence. Sample kind of output example that you should generate
         :
-        The person talks about what he likes, The person talks about content of the video, The person talks about where he lives...e.t.c .
-        It sould start with The person talks about... followed by the subject'''
+        The person dislikes.. , The person suggests... , The person went..., The person thinks..., The person was motivated..., The person jokes... e.t.c .
+        The output should start with The person .. followed by maybe suitable verb ... followed by the subject.The comment might have sarcastical tone, interpret it accordingly.'''
     )
     state['messages'][-1]["response"]= response
+    return state
+def question_asked(state):
+    res=state['messages'][-1]["response"]
+    ques=llm.invoke('''The following is a answer to a question:'''+res+
+                    '''.Concisely derive a single likely question from the above answer. Keep the output in around 5 words in a single sentence.
+                    Sample kind of output example question: What does the person(subject) suggest(action verb)... ,Do the person(subject) believe(action verb)..., When did the person(subject) arrive(action verb)... e.t.c.
+                    
+                    .The question generated should contain at least: question word (Who, when, what, where,why, how...e.t.c) , subject(the person),  and action verb  ''')
+    state['messages'][-1]["question"]=ques
     return state
 def check_improvement(state):
     statement = state['messages'][-1]['statement']
@@ -102,7 +126,7 @@ def where_to_go(state):
 
 # Define the function for preprocessing state
 def print_out(state):
-    return state['messages'][-1]["response"]
+    return state['messages'][-1]["response"],state['messages'][-1]["question"]
 def preprocess(state):
     comment=state['messages'][-1]['statement']
     context=state['messages'][-1]['context']
@@ -119,6 +143,7 @@ workflow2=Graph()
 workflow2.add_node("print_out", print_out)
 workflow.add_node("summarize",summarize)
 workflow2.add_node("point_made",point_made)
+workflow2.add_node("question_asked",question_asked)
 # Add conditional edges
 # workflow.add_conditional_edges(
 #    "check_improvement", 
@@ -133,7 +158,8 @@ workflow2.add_node("point_made",point_made)
 #workflow.add_edge("preprocess", "print_out")
 #workflow.add_edge("summarize","check_improvement")
 #workflow.add_edge("summarize","point_made")
-workflow2.add_edge("point_made","print_out")
+workflow2.add_edge("point_made","question_asked")
+workflow2.add_edge("question_asked","print_out")
 workflow.set_entry_point("summarize")
 workflow.set_finish_point("summarize")
 
@@ -154,15 +180,17 @@ print(summary['messages'][-1]["context"])
 def gen_point(comment):
     state=copy.deepcopy(summary)
     state['messages'][-1]['statement']=comment
-    return app2.invoke(state)
+    point,ques = app2.invoke(state)
+    return point,ques
     
 
 
 df = pd.read_csv('comment/export-youtube-comments.csv')
 df=df[:40]
 df["Comment"]=df["Comment"].apply(clean_text)
-df["point_made"]=df["Comment"].apply(gen_point)
-df.to_csv('point_made.csv', index=False)
+df[['point_made', 'ques_made']] = df['Comment'].apply(lambda x: pd.Series(gen_point(x)))
+df.to_csv('point_made/point_made8.csv', index=False)
+
 # df["hasv"]=df["embedding"].apply(hsh)
 # grouped = df.groupby('hasv')['Comment']
 

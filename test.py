@@ -2,13 +2,15 @@ from langchain_community.llms import Ollama
 from langgraph.graph import END, Graph
 import pandas as pd
 import re
-#from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer
 import numpy as np
 import tensorflow_hub as hub
 from sklearn.preprocessing import normalize
 import copy
+np.random.seed(42)
 llm = Ollama(model="phi3")
-#model = SentenceTransformer('all-MiniLM-L6-v2')
+
+model = SentenceTransformer('Alibaba-NLP/gte-base-en-v1.5', trust_remote_code=True)
 # model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
 # model = hub.load(model_url)
 
@@ -40,7 +42,8 @@ class LSH:
             bin_index = self.hash_vector(vector)
             bins[bin_index].append(vector)
         return bins
-
+lsh=LSH(768,30,30)
+lsh2=LSH(768,100,100)
 def clean_text(text):
     # Remove emojis: Emojis are typically beyond the Basic Multilingual Plane (BMP) of Unicode
     text = re.sub(r'[^\x00-\x7F]+', '', text)
@@ -55,11 +58,13 @@ def clean_text(text):
 #     # Normalize the embedding to use cosine similarity
 #     return normalize(embeddings)[0]
 def embed(sentence):
-    return model.encode(sentence)
+    return model.encode(sentence, normalize_embeddings=True)
 
 
 def hsh(vector):
     return lsh.hash_vector(vector)
+def hsh2(vector):
+    return lsh2.hash_vector(vector)
 
 # Define the function to check for improvement suggestion
 
@@ -82,23 +87,31 @@ def point_made(state):
     statement = state['messages'][-1]['statement']
     context= state['messages'][-1]['context']
     response = llm.invoke(
-        '''Given the summary transcript of a video:'''+context+'''
-        .The following is a comment on such a video:'''
+        '''Given the summary transcript of a yotube video:'''+context+'''
+        .The following is a comment on the comment section of the video:'''
         + statement+'''
-        .Concisely write about the subject the person is talking about in the comment in around 10 words in single sentence. Sample kind of output example that you should generate
+        .Concisely write about the subject the person is talking about in the comment in around 10 words in single sentence and line. Sample kind of output example that you should generate
         :
         The person dislikes.. , The person suggests... , The person went..., The person thinks..., The person was motivated..., The person jokes... e.t.c .
         The output should start with The person .. followed by maybe suitable verb ... followed by the subject.The comment might have sarcastical tone, interpret it accordingly.'''
     )
     state['messages'][-1]["response"]= response
     return state
+
+# def question_asked(state):
+#     res=state['messages'][-1]["response"]
+#     ques=llm.invoke('''The following is a answer to a question:'''+res+
+#                     '''.Concisely derive a single likely question from the above answer. Keep the output in around 5 words in a single sentence.
+#                     Sample kind of output example question: What does the person(subject) suggest(action verb)... ,Do the person(subject) believe(action verb)..., When did the person(subject) arrive(action verb)... e.t.c.
+                    
+#                     .The question generated should contain at least: question word (Who, when, what, where,why, how...e.t.c) , subject(the person),  and action verb  ''')
+#     state['messages'][-1]["question"]=ques
+#     return state
 def question_asked(state):
     res=state['messages'][-1]["response"]
-    ques=llm.invoke('''The following is a answer to a question:'''+res+
-                    '''.Concisely derive a single likely question from the above answer. Keep the output in around 5 words in a single sentence.
-                    Sample kind of output example question: What does the person(subject) suggest(action verb)... ,Do the person(subject) believe(action verb)..., When did the person(subject) arrive(action verb)... e.t.c.
-                    
-                    .The question generated should contain at least: question word (Who, when, what, where,why, how...e.t.c) , subject(the person),  and action verb  ''')
+    ques=llm.invoke('''The following is a statement about a person's action:'''+res+
+                    '''Extract the first 3 words from the sentence. For example if the statement is The person goes to the park, then output: The person goes.'''
+                    )
     state['messages'][-1]["question"]=ques
     return state
 def check_improvement(state):
@@ -135,47 +148,47 @@ def preprocess(state):
     return state
 
 # Create the workflow
-workflow = Graph()
-workflow2=Graph()
-# Add nodes to the workflow
-#workflow.add_node("check_improvement", check_improvement)
-#workflow.add_node("preprocess", preprocess)
-workflow2.add_node("print_out", print_out)
-workflow.add_node("summarize",summarize)
-workflow2.add_node("point_made",point_made)
-workflow2.add_node("question_asked",question_asked)
-# Add conditional edges
-# workflow.add_conditional_edges(
-#    "check_improvement", 
-#    where_to_go,
-#    {
-#        "continue": "preprocess",
-#        "end": END
-#    }
-# )
+# workflow = Graph()
+# workflow2=Graph()
+# # Add nodes to the workflow
+# #workflow.add_node("check_improvement", check_improvement)
+# #workflow.add_node("preprocess", preprocess)
+# workflow2.add_node("print_out", print_out)
+# workflow.add_node("summarize",summarize)
+# workflow2.add_node("point_made",point_made)
+# workflow2.add_node("question_asked",question_asked)
+# # Add conditional edges
+# # workflow.add_conditional_edges(
+# #    "check_improvement", 
+# #    where_to_go,
+# #    {
+# #        "continue": "preprocess",
+# #        "end": END
+# #    }
+# # )
 
 
-#workflow.add_edge("preprocess", "print_out")
-#workflow.add_edge("summarize","check_improvement")
-#workflow.add_edge("summarize","point_made")
-workflow2.add_edge("point_made","question_asked")
-workflow2.add_edge("question_asked","print_out")
-workflow.set_entry_point("summarize")
-workflow.set_finish_point("summarize")
+# #workflow.add_edge("preprocess", "print_out")
+# #workflow.add_edge("summarize","check_improvement")
+# #workflow.add_edge("summarize","point_made")
+# workflow2.add_edge("point_made","question_asked")
+# workflow2.add_edge("question_asked","print_out")
+# workflow.set_entry_point("summarize")
+# workflow.set_finish_point("summarize")
 
-workflow2.set_entry_point("point_made")
-workflow2.set_finish_point("print_out")
-# Compile the workflow
-app = workflow.compile()
+# workflow2.set_entry_point("point_made")
+# workflow2.set_finish_point("print_out")
+# #Compile the workflow
+# app = workflow.compile()
 
-app2=workflow2.compile()
+# app2=workflow2.compile()
 
-with open('transcript.txt', 'r') as file:
-   file_contents = file.read()
+# with open('transcript.txt', 'r') as file:
+#    file_contents = file.read()
 
-input_data = {"messages": [{"context":file_contents}]}
-summary=app.invoke(input_data)
-print(summary['messages'][-1]["context"])
+# input_data = {"messages": [{"context":file_contents}]}
+# summary=app.invoke(input_data)
+# print(summary['messages'][-1]["context"])
 
 def gen_point(comment):
     state=copy.deepcopy(summary)
@@ -185,12 +198,26 @@ def gen_point(comment):
     
 
 
-df = pd.read_csv('comment/export-youtube-comments.csv')
-df=df[:40]
-df["Comment"]=df["Comment"].apply(clean_text)
-df[['point_made', 'ques_made']] = df['Comment'].apply(lambda x: pd.Series(gen_point(x)))
-df.to_csv('point_made/point_made8.csv', index=False)
+# df = pd.read_csv('comment/export-youtube-comments.csv')
+# df=df[:40]
+# df["Comment"]=df["Comment"].apply(clean_text)
+# df[['point_made', 'ques_made']] = df['Comment'].apply(lambda x: pd.Series(gen_point(x)))
+# df.to_csv('point_made/point_made19.csv', index=False)
+df=pd.read_csv('point_made/point_made19.csv')
+df["p_embed"]=df["point_made"].apply(embed)
+df["q_embed"]=df["ques_made"].apply(embed)
 
+df["hasp"]=df["p_embed"].apply(hsh)
+df["hasq"]=df["q_embed"].apply(hsh2)
+# # Group by 'hasp' and 'hasq' and aggregate the text entries into lists
+grp = df.groupby(['hasq','hasp'])[["Comment","point_made","ques_made"]].agg(list).reset_index()
+# # Sort the grouped data by 'hasp' and 'hasq'
+
+sorted_grouped_df = grp.sort_values(by=['hasq','hasp'])
+for col in ["Comment","point_made","ques_made"]:
+    sorted_grouped_df[col] = sorted_grouped_df[col].apply(lambda x: '\n'.join(x))
+print(sorted_grouped_df)
+sorted_grouped_df.to_csv('output/result.csv')
 # df["hasv"]=df["embedding"].apply(hsh)
 # grouped = df.groupby('hasv')['Comment']
 

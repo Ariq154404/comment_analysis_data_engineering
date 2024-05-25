@@ -42,7 +42,7 @@ class LSH:
             bin_index = self.hash_vector(vector)
             bins[bin_index].append(vector)
         return bins
-lsh=LSH(768,30,30)
+lsh=LSH(768,20,20)
 lsh2=LSH(768,100,100)
 def clean_text(text):
     # Remove emojis: Emojis are typically beyond the Basic Multilingual Plane (BMP) of Unicode
